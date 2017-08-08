@@ -32,14 +32,21 @@
 #endif
 #include "salinst.hxx"
 
+#include "osx/runinmain.hxx"
+
 class AquaSalFrame;
+class SalFrame;
+class SalObject;
 class ApplicationEvent;
 class Image;
 enum class SalEvent;
 
+typedef void(^RuninmainBlock)(void);
+
 class SalYieldMutex : public comphelper::GenericSolarMutex
 {
-    bool                    mbInAquireWithTry;
+public:
+    OSX_RUNINMAIN_MEMBERS
 
 protected:
     virtual void            doAcquire( sal_uInt32 nLockCount ) override;
@@ -48,6 +55,8 @@ protected:
 public:
     SalYieldMutex();
     virtual ~SalYieldMutex();
+
+    virtual bool IsCurrentThread() const override;
 };
 
 class AquaSalInstance : public SalInstance
@@ -72,6 +81,7 @@ public:
     osl::Mutex                              maUserEventListMutex;
     osl::Condition                          maWaitingYieldCond;
     bool                                    mbIsLiveResize;
+    bool                                    mbNoYieldLock;
 
     static std::list<const ApplicationEvent*> aAppEventList;
 
@@ -147,8 +157,9 @@ public:
     static const short AppExecuteSVMain   = 0x7fff;
     static const short AppEndLoopEvent    = 1;
     static const short AppStartTimerEvent = 10;
-    static const short PostedUserEvent    = 20;
+    static const short YieldWakeupEvent   = 20;
     static const short DispatchTimerEvent = 30;
+    static const short PostedUserEvent    = 40;
 
     static NSMenu* GetDynamicDockMenu();
 };

@@ -131,9 +131,10 @@ static void ImplSalStopTimer()
 void AquaSalTimer::handleDispatchTimerEvent()
 {
     ImplSVData* pSVData = ImplGetSVData();
-    SolarMutexGuard aGuard;
+    GetSalData()->mpFirstInstance->AcquireYieldMutex( 1 );
     if( pSVData->maSchedCtx.mpSalTimer )
         pSVData->maSchedCtx.mpSalTimer->CallCallback();
+    GetSalData()->mpFirstInstance->ReleaseYieldMutex( false );
 }
 
 void AquaSalTimer::handleStartTimerEvent( NSEvent* pEvent )
