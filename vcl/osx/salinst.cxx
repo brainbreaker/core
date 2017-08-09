@@ -354,7 +354,6 @@ AquaSalInstance::AquaSalInstance()
     mpSalYieldMutex->acquire();
     ::comphelper::SolarMutex::setSolarMutex( mpSalYieldMutex );
     maMainThread = osl::Thread::getCurrentIdentifier();
-    mbWaitingYield = false;
     mnActivePrintJobs = 0;
 }
 
@@ -365,13 +364,6 @@ AquaSalInstance::~AquaSalInstance()
     delete mpSalYieldMutex;
 }
 
-void AquaSalInstance::wakeupYield()
-{
-    // wakeup :Yield
-    if( mbWaitingYield )
-        ImplNSAppPostEvent( AquaSalInstance::YieldWakeupEvent, YES );
-}
-
 void AquaSalInstance::PostUserEvent( AquaSalFrame* pFrame, SalEvent nType, void* pData )
 {
     {
@@ -379,7 +371,9 @@ void AquaSalInstance::PostUserEvent( AquaSalFrame* pFrame, SalEvent nType, void*
         maUserEvents.push_back( SalUserEvent( pFrame, pData, nType ) );
     }
     // notify main loop that an event has arrived
-    wakeupYield();
+    dispatch_async(dispatch_get_main_queue(),^{
+        ImplNSAppPostEvent( AquaSalInstance::PostedUserEvent, NO );
+    });
 }
 
 comphelper::SolarMutex* AquaSalInstance::GetYieldMutex()
@@ -463,6 +457,28 @@ void AquaSalInstance::handleAppDefinedEvent( NSEvent* pEvent )
     case DispatchTimerEvent:
         AquaSalTimer::handleDispatchTimerEvent();
         break;
+    case PostedUserEvent:
+    {
+        // get one user event
+        SalUserEvent aEvent( nullptr, nullptr, SalEvent::NONE );
+        {
+            osl::MutexGuard g( maUserEventListMutex );
+            if ( !maUserEvents.empty() )
+            {
+                aEvent = maUserEvents.front();
+                maUserEvents.pop_front();
+            }
+        }
+
+        // dispatch it
+        if ( aEvent.mpFrame )
+        {
+            osl::Guard< comphelper::SolarMutex > aGuard( *mpSalYieldMutex );
+            if ( AquaSalFrame::isAlive( aEvent.mpFrame ) )
+                aEvent.mpFrame->CallCallback( aEvent.mnType, aEvent.mpData );
+        }
+        break;
+    }
 #if !HAVE_FEATURE_MACOSX_SANDBOX
     case AppleRemoteControlEvent: // Defined in <apple_remote/RemoteMainController.h>
     {
@@ -529,10 +545,6 @@ void AquaSalInstance::handleAppDefinedEvent( NSEvent* pEvent )
     break;
 #endif
 
-    case YieldWakeupEvent:
-        // do nothing, fall out of Yield
-    break;
-
     default:
         OSL_FAIL( "unhandled NSApplicationDefined event" );
         break;
@@ -553,46 +565,10 @@ bool AquaSalInstance::DoYield(bool bWait, bool bHandleAllCurrentEvents, sal_uLon
     // an own pool for each yield level
     ReleasePoolHolder aReleasePool;
 
-    // Release all locks so that we don't deadlock when we pull pending
-    // events from the event queue
-    bool bDispatchUser = true;
-    while( bDispatchUser )
-    {
-        // get one user event
-        SalUserEvent aEvent( nullptr, nullptr, SalEvent::NONE );
-        {
-            osl::MutexGuard g( maUserEventListMutex );
-            if( ! maUserEvents.empty() )
-            {
-                aEvent = maUserEvents.front();
-                maUserEvents.pop_front();
-                bHadEvent = true;
-            }
-            else
-                bDispatchUser = false;
-        }
-
-        // dispatch it
-        if( aEvent.mpFrame && AquaSalFrame::isAlive( aEvent.mpFrame ) )
-        {
-            aEvent.mpFrame->CallCallback( aEvent.mnType, aEvent.mpData );
-            maWaitingYieldCond.set();
-        }
-
-        // return if only one event is asked for
-        if( !bHandleAllCurrentEvents && bDispatchUser )
-            return true;
-    }
-
     // handle cocoa event queue
     // cocoa events may be only handled in the thread the NSApp was created
     if( IsMainThread() && mnActivePrintJobs == 0 )
     {
-        // we need to be woken up by a cocoa-event
-        // if a user event should be posted by the event handling below
-        bool bOldWaitingYield = mbWaitingYield;
-        mbWaitingYield = bWait;
-
         // handle available events
         NSEvent* pEvent = nil;
         do
@@ -635,8 +611,6 @@ SAL_WNODEPRECATED_DECLARATIONS_POP
 
             AcquireYieldMutex( nCount );
         }
-
-        mbWaitingYield = bOldWaitingYield;
 
         // collect update rectangles
         const std::list< AquaSalFrame* > rFrames( GetSalData()->maFrames );

@@ -91,7 +91,7 @@ SAL_WNODEPRECATED_DECLARATIONS_PUSH
         // 'NSShiftKeyMask' is deprecated: first deprecated in macOS 10.12
     if( eType == NSApplicationDefined )
     {
-        AquaSalInstance::handleAppDefinedEvent( pEvent );
+        GetSalData()->mpFirstInstance->handleAppDefinedEvent( pEvent );
     }
     else if( eType == NSKeyDown && ([pEvent modifierFlags] & NSCommandKeyMask) != 0 )
     {

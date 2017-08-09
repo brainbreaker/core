@@ -69,7 +69,6 @@ public:
     SalYieldMutex*                          mpSalYieldMutex;        // Sal-Yield-Mutex
     OUString                                maDefaultPrinter;
     oslThreadIdentifier                     maMainThread;
-    bool                                    mbWaitingYield;
     int                                     mnActivePrintJobs;
     std::list< SalUserEvent >               maUserEvents;
     osl::Mutex                              maUserEventListMutex;
@@ -129,13 +128,11 @@ public:
     virtual css::uno::Reference< css::uno::XInterface > CreateDragSource() override;
     virtual css::uno::Reference< css::uno::XInterface > CreateDropTarget() override;
 
-    static void handleAppDefinedEvent( NSEvent* pEvent );
+    void handleAppDefinedEvent( NSEvent* pEvent );
 
     // check whether a particular string is passed on the command line
     // this is needed to avoid duplicate open events through a) command line and b) NSApp's openFile
     static bool isOnCommandLine( const OUString& );
-
-    void wakeupYield();
 
  public:
     friend class AquaSalFrame;
@@ -153,7 +150,7 @@ public:
     static const short AppExecuteSVMain   = 0x7fff;
     static const short AppEndLoopEvent    = 1;
     static const short AppStartTimerEvent = 10;
-    static const short YieldWakeupEvent   = 20;
+    static const short PostedUserEvent    = 20;
     static const short DispatchTimerEvent = 30;
 
     static NSMenu* GetDynamicDockMenu();
