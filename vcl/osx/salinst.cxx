@@ -259,42 +259,52 @@ void InitSalMain()
 }
 
 SalYieldMutex::SalYieldMutex()
+    : mbInAquireWithTry( false )
 {
-    mnCount  = 0;
-    mnThreadId  = 0;
 }
 
-void SalYieldMutex::acquire()
+SalYieldMutex::~SalYieldMutex()
 {
-    m_mutex.acquire();
-    mnThreadId = osl::Thread::getCurrentIdentifier();
-    mnCount++;
 }
 
-void SalYieldMutex::release()
+void SalYieldMutex::doAcquire( sal_uInt32 nLockCount )
 {
-    if ( mnThreadId == osl::Thread::getCurrentIdentifier() )
+    if ( GetSalData()->mpFirstInstance && GetSalData()->mpFirstInstance->IsMainThread() )
     {
-        if ( mnCount == 1 )
+        while ( !m_aMutex.tryToAcquire() )
         {
-            // TODO: add OpenGLContext::prepareForYield with vcl OpenGL support
-            mnThreadId = 0;
+            mbInAquireWithTry = true;
+SAL_WNODEPRECATED_DECLARATIONS_PUSH
+            // 'NSApplicationDefinedMask' is deprecated: first deprecated in macOS 10.12
+            NSEvent* pPeekEvent = [NSApp nextEventMatchingMask: NSApplicationDefinedMask
+SAL_WNODEPRECATED_DECLARATIONS_POP
+                                   untilDate: [NSDate dateWithTimeIntervalSinceNow: 0.1]
+                                   inMode: NSDefaultRunLoopMode
+                                   dequeue: YES];
+            if ( AquaSalInstance::UnlockedYieldMutexEvent != (int) [pPeekEvent subtype] )
+                [NSApp postEvent: pPeekEvent atStart: YES];
         }
-        mnCount--;
-    }
-    m_mutex.release();
-}
-
-bool SalYieldMutex::tryToAcquire()
-{
-    if ( m_mutex.tryToAcquire() )
-    {
-        mnThreadId = osl::Thread::getCurrentIdentifier();
-        mnCount++;
-        return true;
+        mbInAquireWithTry = false;
     }
     else
-        return false;
+        m_aMutex.acquire();
+    ++m_nCount;
+    --nLockCount;
+
+    comphelper::GenericSolarMutex::doAcquire( nLockCount );
+}
+
+sal_uInt32 SalYieldMutex::doRelease( const bool bUnlockAll )
+{
+    sal_uInt32 nCount = comphelper::GenericSolarMutex::doRelease( bUnlockAll );
+
+    if ( mbInAquireWithTry && 0 == m_nCount
+            && !GetSalData()->mpFirstInstance->IsMainThread() )
+        dispatch_async(dispatch_get_main_queue(),^{
+            ImplNSAppPostEvent( AquaSalInstance::UnlockedYieldMutexEvent, NO );
+            });
+
+    return nCount;
 }
 
 // some convenience functions regarding the yield mutex, aka solar mutex
@@ -352,14 +362,12 @@ AquaSalInstance::AquaSalInstance()
 {
     mpSalYieldMutex = new SalYieldMutex;
     mpSalYieldMutex->acquire();
-    ::comphelper::SolarMutex::setSolarMutex( mpSalYieldMutex );
     maMainThread = osl::Thread::getCurrentIdentifier();
     mnActivePrintJobs = 0;
 }
 
 AquaSalInstance::~AquaSalInstance()
 {
-    ::comphelper::SolarMutex::setSolarMutex( nullptr );
     mpSalYieldMutex->release();
     delete mpSalYieldMutex;
 }
@@ -381,47 +389,14 @@ comphelper::SolarMutex* AquaSalInstance::GetYieldMutex()
     return mpSalYieldMutex;
 }
 
-sal_uLong AquaSalInstance::ReleaseYieldMutex()
+sal_uInt32 AquaSalInstance::ReleaseYieldMutex( bool bUnlockAll )
 {
-    SalYieldMutex* pYieldMutex = mpSalYieldMutex;
-    if ( pYieldMutex->GetThreadId() ==
-         osl::Thread::getCurrentIdentifier() )
-    {
-        sal_uLong nCount = pYieldMutex->GetAcquireCount();
-        sal_uLong n = nCount;
-        while ( n )
-        {
-            pYieldMutex->release();
-            n--;
-        }
-
-        return nCount;
-    }
-    else
-        return 0;
+    return mpSalYieldMutex->release( bUnlockAll );
 }
 
-void AquaSalInstance::AcquireYieldMutex( sal_uLong nCount )
+void AquaSalInstance::AcquireYieldMutex( sal_uInt32 nCount )
 {
-    SalYieldMutex* pYieldMutex = mpSalYieldMutex;
-    while ( nCount )
-    {
-        pYieldMutex->acquire();
-        nCount--;
-    }
-}
-
-bool AquaSalInstance::CheckYieldMutex()
-{
-    bool bRet = true;
-
-    SalYieldMutex* pYieldMutex = mpSalYieldMutex;
-    if ( pYieldMutex->GetThreadId() != osl::Thread::getCurrentIdentifier())
-    {
-        bRet = false;
-    }
-
-    return bRet;
+    mpSalYieldMutex->acquire( nCount );
 }
 
 bool AquaSalInstance::IsMainThread() const
@@ -473,7 +448,7 @@ void AquaSalInstance::handleAppDefinedEvent( NSEvent* pEvent )
         // dispatch it
         if ( aEvent.mpFrame )
         {
-            osl::Guard< comphelper::SolarMutex > aGuard( *mpSalYieldMutex );
+            SolarMutexGuard aGuard;
             if ( AquaSalFrame::isAlive( aEvent.mpFrame ) )
                 aEvent.mpFrame->CallCallback( aEvent.mnType, aEvent.mpData );
         }
@@ -573,8 +548,6 @@ bool AquaSalInstance::DoYield(bool bWait, bool bHandleAllCurrentEvents, sal_uLon
         NSEvent* pEvent = nil;
         do
         {
-            sal_uLong nCount = ReleaseYieldMutex();
-
 SAL_WNODEPRECATED_DECLARATIONS_PUSH
     // 'NSAnyEventMask' is deprecated: first deprecated in macOS 10.12
             pEvent = [NSApp nextEventMatchingMask: NSAnyEventMask
@@ -584,18 +557,18 @@ SAL_WNODEPRECATED_DECLARATIONS_POP
                             dequeue: YES];
             if( pEvent )
             {
+                SolarMutexReleaser aReleaser;
                 [NSApp sendEvent: pEvent];
+                [NSApp updateWindows];
                 bHadEvent = true;
             }
-            [NSApp updateWindows];
-
-            AcquireYieldMutex( nCount );
-        } while( bHandleAllCurrentEvents && pEvent );
+        }
+        while( bHandleAllCurrentEvents && pEvent );
 
         // if we had no event yet, wait for one if requested
         if( bWait && ! bHadEvent )
         {
-            sal_uLong nCount = ReleaseYieldMutex();
+            SolarMutexReleaser aReleaser;
 
             NSDate* pDt = AquaSalTimer::pRunningTimer ? [AquaSalTimer::pRunningTimer fireDate] : [NSDate distantFuture];
 SAL_WNODEPRECATED_DECLARATIONS_PUSH
@@ -608,8 +581,6 @@ SAL_WNODEPRECATED_DECLARATIONS_POP
             if( pEvent )
                 [NSApp sendEvent: pEvent];
             [NSApp updateWindows];
-
-            AcquireYieldMutex( nCount );
         }
 
         // collect update rectangles
@@ -630,10 +601,8 @@ SAL_WNODEPRECATED_DECLARATIONS_POP
         // wait until any thread (most likely the main thread)
         // has dispatched an event, cop out at 200 ms
         maWaitingYieldCond.reset();
-        TimeValue aVal = { 0, 200000000 };
-        sal_uLong nCount = ReleaseYieldMutex();
-        maWaitingYieldCond.wait( &aVal );
-        AcquireYieldMutex( nCount );
+        SolarMutexReleaser aReleaser;
+        maWaitingYieldCond.wait();
     }
 
     // we get some apple events way too early
@@ -955,23 +924,6 @@ OUString AquaSalInstance::getOSVersion()
         aVersion += "(unknown)";
 
     return aVersion;
-}
-
-// YieldMutexReleaser
-YieldMutexReleaser::YieldMutexReleaser() : mnCount( 0 )
-{
-    SalData* pSalData = GetSalData();
-    if( ! pSalData->mpFirstInstance->IsMainThread() )
-    {
-        SalData::ensureThreadAutoreleasePool();
-        mnCount = pSalData->mpFirstInstance->ReleaseYieldMutex();
-    }
-}
-
-YieldMutexReleaser::~YieldMutexReleaser()
-{
-    if( mnCount != 0 )
-        GetSalData()->mpFirstInstance->AcquireYieldMutex( mnCount );
 }
 
 CGImageRef CreateCGImage( const Image& rImage )
