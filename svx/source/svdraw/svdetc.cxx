@@ -113,8 +113,6 @@ OLEObjCache::OLEObjCache()
     pTimer->SetInvokeHandler( LINK(this, OLEObjCache, UnloadCheckHdl) );
     pTimer->SetTimeout(20000);
     pTimer->SetStatic();
-    pTimer->Invoke();
-    pTimer->Start();
 }
 
 OLEObjCache::~OLEObjCache()
@@ -196,6 +194,9 @@ void OLEObjCache::InsertObj(SdrOle2Obj* pObj)
         // a new object was inserted, recalculate the cache
         UnloadOnDemand();
     }
+
+    if ( !pTimer->IsActive() )
+        pTimer->Start();
 }
 
 void OLEObjCache::RemoveObj(SdrOle2Obj* pObj)
@@ -203,6 +204,8 @@ void OLEObjCache::RemoveObj(SdrOle2Obj* pObj)
     std::vector<SdrOle2Obj*>::iterator it = std::find(maObjs.begin(), maObjs.end(), pObj);
     if (it != maObjs.end())
         maObjs.erase(it);
+    if (maObjs.empty())
+        pTimer->Stop();
 }
 
 size_t OLEObjCache::size() const
