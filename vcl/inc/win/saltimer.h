@@ -24,16 +24,45 @@
 
 class WinSalTimer : public SalTimer
 {
+    HANDLE       m_nTimerId;             ///< Windows timer id
+    sal_uInt32   m_nTimerStartTicks;     ///< system ticks at timer start % SAL_MAX_UINT32
+    bool         m_bOnIdleRunScheduler;  ///< Run yield until the scheduler processed the idle
+
 public:
-    WinSalTimer() {}
+    WinSalTimer();
     virtual ~WinSalTimer() override;
 
     virtual void Start(sal_uIntPtr nMS) override;
     virtual void Stop() override;
+
+    inline bool IsValidWPARAM( WPARAM wParam ) const;
+
+    inline bool WantBusyLoop() const;
+    inline void ResetBusyLoop();
+
+    // The Impl functions are just public to be called from the static
+    // SalComWndProc on main thread redirect! Otherwise they would be private.
+    // They must be called from the main application thread only!
+
+    void ImplStart( sal_uIntPtr nMS );
+    void ImplStop();
+    void ImplEmitTimerCallback();
 };
 
-void ImplSalStartTimer( sal_uIntPtr nMS );
-void ImplSalStopTimer();
+inline bool WinSalTimer::IsValidWPARAM( WPARAM aWPARAM ) const
+{
+    return aWPARAM == m_nTimerStartTicks;
+}
+
+inline bool WinSalTimer::WantBusyLoop() const
+{
+    return m_bOnIdleRunScheduler;
+}
+
+inline void WinSalTimer::ResetBusyLoop()
+{
+    m_bOnIdleRunScheduler = false;
+}
 
 #endif
 
