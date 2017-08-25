@@ -32,35 +32,28 @@ $(eval $(call gb_Module_add_l10n_targets,dbaccess,\
 ))
 
 ifneq ($(OS),IOS)
-ifeq ($(ENABLE_FIREBIRD_SDBC),TRUE)
-$(eval $(call gb_Module_add_check_targets,dbaccess,\
-    CppunitTest_dbaccess_firebird_test \
-))
-endif
 
 $(eval $(call gb_Module_add_check_targets,dbaccess,\
 	CppunitTest_dbaccess_dialog_save \
 	CppunitTest_dbaccess_empty_stdlib_save \
 	CppunitTest_dbaccess_nolib_save \
 	CppunitTest_dbaccess_macros_test \
-	$(if $(ENABLE_JAVA), \
-		CppunitTest_dbaccess_RowSetClones) \
 ))
 
 ifeq ($(ENABLE_JAVA),TRUE)
+
 $(eval $(call gb_Module_add_check_targets,dbaccess,\
+    CppunitTest_dbaccess_RowSetClones) \
     CppunitTest_dbaccess_hsqldb_test \
 ))
-endif
 
 # This runs a suite of performance tests on embedded firebird and HSQLDB.
 # Instructions on running the test can be found in qa/unit/embeddedb_performancetest
 ifeq ($(ENABLE_FIREBIRD_SDBC),TRUE)
-ifeq ($(ENABLE_JAVA),TRUE)
 $(eval $(call gb_Module_add_check_targets,dbaccess,\
+    CppunitTest_dbaccess_firebird_test \
     CppunitTest_dbaccess_embeddeddb_performancetest \
 ))
-endif
 endif
 
 $(eval $(call gb_Module_add_subsequentcheck_targets,dbaccess,\
@@ -69,19 +62,20 @@ $(eval $(call gb_Module_add_subsequentcheck_targets,dbaccess,\
 ))
 
 ifneq ($(DISABLE_PYTHON),TRUE)
-ifneq ($(ENABLE_JAVA),)
 $(eval $(call gb_Module_add_subsequentcheck_targets,dbaccess,\
 	PythonTest_dbaccess_python \
 ))
 endif
-endif
+
+endif # ifeq ($(ENABLE_JAVA),TRUE)
 
 # screenshots
 $(eval $(call gb_Module_add_screenshot_targets,dbaccess,\
     CppunitTest_dbaccess_dialogs_test \
 ))
 
-endif
+endif # ifneq ($(OS),IOS)
+
 endif
 
 # vim: set noet sw=4 ts=4:
