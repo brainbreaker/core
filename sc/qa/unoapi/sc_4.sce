@@ -29,12 +29,13 @@
 # ported to cppunit -o sc.ScHeaderFieldObj
 -o sc.ScHeaderFieldsObj
 -o sc.ScHeaderFooterContentObj
--o sc.ScHeaderFooterTextCursor
 # SHF_TextObj is composed of SHF_TextData, which has a weak reference to
 # SHF_ContentObj, which itself has three references to SHF_TextObj.
 # The css::text::XTextRange test fails often when the weak SHF_ContentObj is
 # already gone. If just this test is disabled, later tests of this object fail
 # too, so this disables the whole interface.
+# Same for ScHeaderFooterTextCursor.
+# -o sc.ScHeaderFooterTextCursor
 # -o sc.ScHeaderFooterTextObj
 -o sc.ScIndexEnumeration_CellAnnotationsEnumeration
 -o sc.ScIndexEnumeration_CellAreaLinksEnumeration
